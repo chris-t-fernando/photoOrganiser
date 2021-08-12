@@ -6,8 +6,13 @@ $dir = $argv[2];
 $dateString = $argv[3];
 $file = $argv[4];
 
+$log;
+$fLog;
+
+$fLog = fopen("e:\\photolog.log", "a");
+
 // run exiftool
-exec("z:\\exiftool.exe \"" . $thisFile . "\" 2>&1", $probe, $returnValue);
+exec("z:\\photoOrganiser\\exiftool.exe \"" . $thisFile . "\" 2>&1", $probe, $returnValue);
 						
 // pull out the modify date
 $thisDate = getExifCreateDate($thisFile, $probe, $dateString);
@@ -269,11 +274,12 @@ function addLog($message)
 	echo "LOG: " . $message;
 	$log .= $message;
 	
-	$fLog = fopen("e:\photolog.log", "a");
-	fwrite($fLog, $message);
-	fclose($fLog);	
+	
+	#fwrite($fLog, $message);
+	#fflush($fLog);
 	
 }
 
+fclose($fLog);	
 
 ?>

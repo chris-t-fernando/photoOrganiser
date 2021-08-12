@@ -72,7 +72,7 @@ function read_directory($dir, $recursion)
 					if ( isset($extension) )
 					{
 						// call the php to call exiftool but background the task
-						$cmd = "php.exe z:\\findWorker.php \"" . $thisFile . "\" \"" . $dir . "\" \"" . $dateString . "\" \"" . $files[$i] . "\"";
+						$cmd = "php.exe findWorker.php \"" . $thisFile . "\" \"" . $dir . "\" \"" . $dateString . "\" \"" . $files[$i] . "\"";
 						pclose(popen("start /B ". $cmd, "r"));
 						
 						$done++;
@@ -80,7 +80,7 @@ function read_directory($dir, $recursion)
 						if ( ($done % 15) == 0 )
 						{
 							echo "Up to folder " . $dir . " and modified date " . date("Y-m-d", filemtime($thisFile)) . "\r\n";
-							sleep(5);
+							sleep(15);
 							
 						}
 
@@ -325,11 +325,11 @@ function getFileModifyDate($thisFile, $probe)
 
 function addLog($message)
 {
-	global $log;
-	global $fLog;
-	$message .= "\r\n";
-	echo "LOG: " . $message;
-	$log .= $message;
+//	global $log;
+//	global $fLog;
+//	$message .= "\r\n";
+//	echo "LOG: " . $message;
+//	$log .= $message;
 //	fwrite($fLog, $message);
 }
 
