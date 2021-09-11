@@ -81,7 +81,7 @@ def get_hash(file):
     return file_hash.hexdigest()  # Get the hexadecimal digest of the hash
 
 
-def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
+def run_fast_scandir(dir, ext, output_queue, status_consumer):  # dir: str, ext: list
     subfolders, files, ignored = [], [], []
 
     for f in os.scandir(dir):
@@ -94,6 +94,7 @@ def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
                 logger.debug(f"{f} ignored due to filetype")
                 ignored.append(f.path)
 
+    status = {}
     batch = []
     counter = 0
     for f in files:
@@ -104,6 +105,7 @@ def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
             batch = []
             counter = 0
 
+    # for any extras left in the batch beyond the last 100
     if len(batch) > 0:
         output_queue.put(batch)
 
@@ -112,6 +114,11 @@ def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
         subfolders.extend(sf)
         files.extend(f)
         ignored.extend(ign)
+        status["proc_name"] = "search guy"
+        status["queue_size"] = len(file)
+        status["processed"] = 0
+        status_consumer.put(status)
+
     return subfolders, files, ignored
 
 
@@ -313,6 +320,8 @@ class ExifConsumer(multiprocessing.Process):
         files_skipped = 0
         files_total = 0
         while True:
+
+            # print(f"Exif queue size: {str(self.input_queue.qsize())}")
             next_task = self.input_queue.get()
 
             if next_task is None:
@@ -355,11 +364,12 @@ class ExifConsumer(multiprocessing.Process):
 
 
 class SearchConsumer(multiprocessing.Process):
-    def __init__(self, input_queue, output_queue, manager_dict):
+    def __init__(self, input_queue, output_queue, manager_dict, status_consumer):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.manager_dict = manager_dict
+        self.status_consumer = status_consumer
 
     def run(self):
         ext = [".mov", ".jpg", ".heic", ".mp4", ".png", ".jpeg", ".3gp", ".avi"]
@@ -378,7 +388,42 @@ class SearchConsumer(multiprocessing.Process):
                 # self.input_queue.task_done()
                 break
 
-            sf, f, ignored = run_fast_scandir(next_task, ext, self.output_queue)
+            sf, f, ignored = run_fast_scandir(
+                next_task, ext, self.output_queue, self.status_consumer
+            )
+
+        return
+
+
+class StatusConsumer(multiprocessing.Process):
+    def __init__(self, input_queue):
+        multiprocessing.Process.__init__(self)
+        self.input_queue = input_queue
+
+    def run(self):
+        proc_name = self.name
+        last_state = {}
+        while True:
+            next_task = self.input_queue.get()
+            if next_task is None:
+                # Poison pill means shutdown
+                self.input_queue.put(None)
+                self.input_queue.task_done()
+                break
+
+            # assume next_task is a dict
+            # next_task['proc_name'] = "ProcessorConsumer4"
+            # next_task['queue_size'] = 500
+            # next_task['processed'] = 10
+            last_state[next_task["proc_name"]] = next_task
+
+            # if seconds % 5 == 0 then show a status update
+            #
+            a = datetime.datetime.now()
+            if a.second % 5 == 0:
+                for t in last_state:
+                    print(f'{t["proc_name"]}')
+                pass
 
         return
 
@@ -397,6 +442,12 @@ def main():
     else:
         logger.debug("Paths is good")
 
+    state_machine = imagefile.PhotoMachine(paths["output_path"])
+
+    status_tasks = multiprocessing.JoinableQueue()
+    status_consumer = StatusConsumer(status_tasks)
+    status_consumer.start()
+
     manager = Manager()
     managerDict = manager.dict()
 
@@ -408,7 +459,9 @@ def main():
     search_results = multiprocessing.JoinableQueue()
 
     # start searchers
-    search_consumer = SearchConsumer(search_tasks, search_results, managerDict)
+    search_consumer = SearchConsumer(
+        search_tasks, search_results, managerDict, status_consumer
+    )
     search_consumer.start()
 
     # push the incoming search path into the search process
@@ -423,9 +476,9 @@ def main():
     exif_results = multiprocessing.JoinableQueue()
 
     # Start exif consumers
-    num_consumers = multiprocessing.cpu_count() * 2
+    # num_consumers = multiprocessing.cpu_count() * 2
     # for debugging
-    # num_consumers = 1
+    num_consumers = 1
     logging.debug(f"exif_results: Creating {num_consumers} consumers")
     exif_consumers = [
         ExifConsumer(search_results, exif_results, paths["output_path"])
@@ -444,9 +497,10 @@ def main():
 
     # Start outputting results
     while True:
-        if "Search" in managerDict.keys():
-            print(f"BLABLAH: {managerDict['Search']}")
+        #        if "Search" in managerDict.keys():
+        #            print(f"BLABLAH: {managerDict['Search']}")
         thisProcessorResult = processor_results.get()
+
         # poison pill, we're done here
         if thisProcessorResult == None:
             print(f"Exhausted output queue")
@@ -455,6 +509,11 @@ def main():
             # search_results.put(None)
             # exif_results.put(None)
             log_file.close()
+            search_tasks.close()
+            search_results.close()
+            exif_results.close()
+            processor_results.close()
+
             exit()
         else:
             print(f"Result: {thisProcessorResult }")
