@@ -41,7 +41,8 @@ class ImageFile:
     tagging_present = False
 
     # attributes set by set_winner()
-    winner = False
+    winner = None
+    reason = None
 
     def __init__(self, source_fullpath, destination_root, metadata):
 
@@ -86,8 +87,9 @@ class ImageFile:
                 f"{self.source_fullpath}: Finished analysing file.  Destination {self.destination_fullpath} (exif date)"
             )
 
-    def set_winner(self, bool_winner):
+    def set_winner(self, bool_winner, reason):
         self.winner = bool_winner
+        self.reason = reason
 
     def select_date_metadata(self, metadata):
         search_tags = [
@@ -102,11 +104,17 @@ class ImageFile:
         metadata_keys = metadata.keys()
         for tag in search_tags:
             if tag in metadata.keys():
-                self.tag_date = datetime.datetime.strptime(
-                    metadata[tag], "%Y:%m:%d %H:%M:%S"
-                )
-                self.tagging_present = True
-                return True
+                # got some malformed tags coming back from exif
+                if (
+                    metadata[tag] != "0000:00:00 00:00:00"
+                    and str(metadata[tag]).count(" ") == 1
+                ):
+                    self.tag_date = datetime.datetime.strptime(
+                        metadata[tag], "%Y:%m:%d %H:%M:%S"
+                    )
+                    self.tagging_present = True
+                    return True
+
         return False
 
     def generate_destination(self):
@@ -126,20 +134,22 @@ class ImageFile:
             logger.debug(
                 f"{self.source_fullpath}: Destination generated using file stat data"
             )
+            # poor form but fall back to stat date
+            self.tag_date = self.file_modify
 
         self.destination_year = self.destination_date.strftime("%Y")
         self.destination_month = self.destination_date.strftime("%m")
 
         self.destination_folder = (
             self.destination_root
-            + "\\"
+            + "/"
             + self.destination_year
-            + "\\"
+            + "/"
             + self.destination_month
         )
 
         self.destination_fullpath = (
-            self.destination_folder + "\\" + self.source_file_name
+            self.destination_folder + "/" + self.source_file_name
         )
 
         return
@@ -209,22 +219,34 @@ class PhotoMachine:
 
     def process_exif(self):
         this_batch = []
+        batches = 0
 
         # loop through all of the existing images
         for f in self.existing_images:
-            # batch them into groups of 100
+            # batch them into groups of 400
             this_batch.append(f)
 
-            if len(this_batch) == 100:
-                # do the batch of 100
-                self.process_exif_batch()
+            if len(this_batch) == 400:
+                # do the batch of 400
+                self.process_exif_batch(this_batch)
+                batches += 1
+                files_complete = batches * 400
+                # \x1b[1K
+                print(
+                    f"Processing exif for {len(self.existing_images)} existing files ({round(files_complete / len(self.existing_images) * 100,1)}% complete)",
+                    end="\r",
+                )
 
-                # its done so reset to an empty List
+                # its done, so reset to an empty List
                 this_batch = []
 
         # if there is more than 0 but less than 100 in the queue (last batch)
         if len(this_batch) > 0:
             self.process_exif_batch(this_batch)
+            print(
+                f"Processed exif for {len(self.existing_images)} existing files (100% complete)          ",
+                end="\r",
+            )
 
     def process_exif_batch(self, this_batch):
         with exiftool.ExifTool() as et:
@@ -239,27 +261,36 @@ class PhotoMachine:
                 )
             )
 
-    # return True is new is better than existing
+    # return True if new is better than existing
     # or False if they're the same or existing is better
     def is_better(self, new, existing):
         # check size
         if new.file_size > existing.file_size:
-            return True
-
-        # check hash - if its the same file, then the existing isn't better
-        if new.get_hash() == existing.get_hash():
-            return False
+            return True, "file size is larger"
 
         # check mod date - if new is older, go with it (maybe it got edited or stat updated or something)
         if new.tag_date < existing.tag_date:
-            return True
+            return True, "tag date is older"
+
+        # check hash - if its the same file, then the existing isn't better
+        if new.get_hash() == existing.get_hash():
+            if new.destination_root in new.source_fullpath:
+                return True, "hash matches, keep in situ destination file"
+            else:
+                return False, "hash matches"
 
         # file size is the same, contents are different, but existing has older modified stamp
-        return False
+        # if one of the comparison files is in the output path already, then take it - to reduce IO (assuming they're on different volumes)
+        if new.destination_root in new.source_fullpath:
+            return True, "default, keep in situ destination file"
+        else:
+            return False, "default"
 
-    def execute_actions(self):
+    def decide(self):
+        files_complete = 0
         # loop through the competitors for best destination_image
         for destination_image in self.ImageObjects_by_destination:
+            files_complete += 1
 
             # need to work out which one is the best option
             # this just resets the holder per destination_image
@@ -270,28 +301,53 @@ class PhotoMachine:
                 # if there hasn't been another contender yet - something is better than nothing
                 if best_option == None:
                     best_option = source_image
-                    print(f"there is no best_option, so {best_option} is the winner")
+                    logging.debug(
+                        f"there is no best_option, so {best_option} is the winner"
+                    )
+                    self.ImageObjects_by_source[best_option].set_winner(
+                        True, "uncontested"
+                    )
+
                 else:
                     # there's something to compare against.  Pulled the logic out inot a separate method for ease of understanding and testing
-                    if self.is_better(
+                    is_better, reason = self.is_better(
                         self.ImageObjects_by_source[source_image],
                         self.ImageObjects_by_source[best_option],
-                    ):
+                    )
+                    if is_better:
                         # this source is better than the previous best option
-                        # first set the old best_option to no longer be the best option - ie. change it to delete isntead of winner
+                        # first tell the old winner that it isn't any more
+                        self.ImageObjects_by_source[best_option].set_winner(
+                            False, reason
+                        )
 
-                        # then set the new one to the be the best option - ie. set it to winner
+                        logger.debug(
+                            f"best_option {best_option} is not better than contender {source_image} - replacing"
+                        )
 
-                        # finally, set best_option to be the new one
+                        # now set best_option to the new winner
                         best_option = source_image
 
-                        print(
-                            f"best_option {best_option} is not better than contender {source_image} - replacing"
+                        # last tell the new winner that its the winner
+                        self.ImageObjects_by_source[best_option].set_winner(
+                            True, reason
                         )
 
                     else:
                         # this source is less good than the previous best option
                         # set the old best_option to no longer be the best option - ie. change it to delete isntead of winner
-                        print(
+                        logger.debug(
                             f"best_option {best_option} is better than contender {source_image}"
                         )
+
+                        self.ImageObjects_by_source[source_image].set_winner(
+                            False, reason
+                        )
+            if files_complete % 200 == 0:
+                print(
+                    f"\rProcessing {len(self.ImageObjects_by_destination)} decisions ({round(files_complete / len(self.ImageObjects_by_destination) *100,1)}% complete)",
+                    end="\r",
+                )
+        print(
+            f"\rProcessed {len(self.ImageObjects_by_destination)} decisions (100% complete)         ",
+        )

@@ -87,18 +87,18 @@ class PhotoMachine:
     def is_better(self, new, existing):
         # check size
         if new.file_size > existing.file_size:
-            return True
+            return True, "file size"
 
         # check hash - if its the same file, then the existing isn't better
         if new.get_hash() == existing.get_hash():
-            return False
+            return False, "hash matches"
 
         # check mod date - if new is older, go with it (maybe it got edited or stat updated or something)
         if new.tag_date < existing.tag_date:
-            return True
+            return True, "date"
 
         # file size is the same, contents are different, but existing has older modified stamp
-        return False
+        return False, "default"
 
     def execute_actions(self):
         # loop through the competitors for best destination_image
@@ -114,6 +114,7 @@ class PhotoMachine:
                 if best_option == None:
                     best_option = source_image
                     print(f"there is no best_option, so {best_option} is the winner")
+                    best_option.set_winner(True)
                 else:
                     # there's something to compare against.  Pulled the logic out inot a separate method for ease of understanding and testing
                     if self.is_better(
@@ -121,12 +122,14 @@ class PhotoMachine:
                         self.ImageObjects_by_source[best_option],
                     ):
                         # this source is better than the previous best option
-                        # first set the old best_option to no longer be the best option - ie. change it to delete isntead of winner
+                        # first tell the old winner that it isn't any more
+                        best_option.set_winner(False)
 
-                        # then set the new one to the be the best option - ie. set it to winner
-
-                        # finally, set best_option to be the new one
+                        # now set best_option to the new winner
                         best_option = source_image
+
+                        # last tell the new winner that its the winner
+                        best_option.set_winner(True)
 
                         print(
                             f"best_option {best_option} is not better than contender {source_image} - replacing"
@@ -138,6 +141,7 @@ class PhotoMachine:
                         print(
                             f"best_option {best_option} is better than contender {source_image}"
                         )
+                        source_image.set_winner(False)
 
 
 image_files = [

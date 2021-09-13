@@ -1,10 +1,5 @@
 import logging
-
-# import os.path
 from os import path
-
-# from pathlib import Path
-
 
 def get_argument(arguments, search_argument):
     found = False
@@ -26,6 +21,8 @@ def validate_arguments(arguments):
 
     incoming_path = get_argument(arguments, ["--input", "-i"])
     output_path = get_argument(arguments, ["--output", "-o"])
+    debug_enabled = get_argument(arguments, ["--debug", "-d"])
+    dryrun_enabled = get_argument(arguments, ["--dryrun"])
 
     if incoming_path == False or output_path == False:
         valid_arguments = False
@@ -43,54 +40,42 @@ def validate_arguments(arguments):
         logging.error(f'{__file__} --input "c:\\some directory" --output c:\\myphotos')
         return False
 
+    # convert Windows paths to Unix paths
+    incoming_path = incoming_path.replace("\\", "/")
+    output_path = output_path.replace("\\", "/")
+
     return_paths = {}
     return_paths["incoming_path"] = incoming_path
     return_paths["output_path"] = output_path
 
-    return return_paths
-
-
-def get_mov_timestamps(filename):
-    ''' Get the creation and modification date-time from .mov metadata.
-
-        Returns None if a value is not available.
-    '''
-    from datetime import datetime as DateTime
-    import struct
-
-    ATOM_HEADER_SIZE = 8
-    # difference between Unix epoch and QuickTime epoch, in seconds
-    EPOCH_ADJUSTER = 2082844800
-
-    creation_time = modification_time = None
-
-    # search for moov item
-    with open(filename, "rb") as f:
-        while True:
-            atom_header = f.read(ATOM_HEADER_SIZE)
-            #~ print('atom header:', atom_header)  # debug purposes
-            if atom_header[4:8] == b'moov':
-                break  # found
-            else:
-                atom_size = struct.unpack('>I', atom_header[0:4])[0]
-                f.seek(atom_size - 8, 1)
-
-        # found 'moov', look for 'mvhd' and timestamps
-        atom_header = f.read(ATOM_HEADER_SIZE)
-        if atom_header[4:8] == b'cmov':
-            raise RuntimeError('moov atom is compressed')
-        elif atom_header[4:8] != b'mvhd':
-            raise RuntimeError('expected to find "mvhd" header.')
+    if debug_enabled != False:
+        if debug_enabled.lower() == "true":
+            return_paths["debug"] = True
+        elif debug_enabled.lower() == "false":
+            return_paths["debug"] = False
         else:
-            f.seek(4, 1)
-            creation_time = struct.unpack('>I', f.read(4))[0] - EPOCH_ADJUSTER
-            creation_time = DateTime.fromtimestamp(creation_time)
-            if creation_time.year < 1990:  # invalid or censored data
-                creation_time = None
+            logging.error(f"Correct usage:")
+            logging.error(
+                f'{__file__} --input "c:\\some directory" --output c:\\myphotos --debug true'
+            )
+            # its not enough of an issue that it should stop execution
+            return_paths["debug"] = False
+    else:
+        return_paths["debug"] = False
 
-            modification_time = struct.unpack('>I', f.read(4))[0] - EPOCH_ADJUSTER
-            modification_time = DateTime.fromtimestamp(modification_time)
-            if modification_time.year < 1990:  # invalid or censored data
-                modification_time = None
+    if dryrun_enabled != False:
+        if dryrun_enabled.lower() == "true":
+            return_paths["dryrun"] = True
+        elif dryrun_enabled.lower() == "false":
+            return_paths["dryrun"] = False
+        else:
+            logging.error(f"Correct usage:")
+            logging.error(
+                f'{__file__} --input "c:\\some directory" --output c:\\myphotos --dryrun true'
+            )
+            # its not enough of an issue that it should stop execution
+            return_paths["dryrun"] = False
+    else:
+        return_paths["dryrun"] = False
 
-    return creation_time, modification_time
+    return return_paths

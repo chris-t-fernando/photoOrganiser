@@ -1,14 +1,13 @@
 import multiprocessing
-from multiprocessing import Manager
 import logging, sys
 import os
-import pathlib
-import hashlib
+import shutil
 import datetime
 from photo_organiser import argument_functions
 from photo_organiser import imagefile
 import exiftool
 import csv
+from pprint import pprint
 
 # logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 # logger.info("Starting up photo organiser")
@@ -20,68 +19,55 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 imageLogger.setLevel(logging.ERROR)
 logger.setLevel(logging.INFO)
 
-log_file = open("photo_organiser.log", "w")
+log_file = open("photo_organiser.log", "w", newline="")
 log_writer = csv.writer(log_file, delimiter=",", quotechar='"')
+log_writer.writerow(
+    [
+        "Log date",
+        "Destination",
+        "Source",
+        "Winner?",
+        "Reason",
+        "Source size",
+        "Source hash",
+        "Source date",
+        "Destination size",
+        "Destination hash",
+        "Destination date",
+    ]
+)
 
 
 def write_log(
-    process,
-    action,
-    input_file,
-    destination_file,
-    message,
-    input_comparison,
-    destination_comparison,
+    destination_image,
+    source_image,
+    winner,
+    reason,
+    source_size,
+    source_hash,
+    source_date,
+    #    destination_size,
+    #    destination_hash,
+    #    destination_date,
 ):
     log_writer.writerow(
         [
             datetime.datetime.now().strftime("%H:%M:%S"),
-            process,
-            action,
-            input_file,
-            destination_file,
-            message,
-            input_comparison,
-            destination_comparison,
+            destination_image,
+            source_image,
+            winner,
+            reason,
+            source_size,
+            source_hash,
+            source_date,
+            #            destination_size,
+            #            destination_hash,
+            #            destination_date,
         ]
     )
-    log_file.flush()
 
 
-# consolidate this down later
-def select_date_metadata(metadata):
-    search_tags = [
-        "EXIF:CreateDate",
-        "EXIF:DateTimeOriginal",
-        "Composite:DateTimeCreated",
-        "QuickTime:CreateDate",
-        "QuickTime:TrackCreateDate",
-        "QuickTime:MediaCreateDate",
-        "RIFF:DateTimeOriginal",
-    ]
-    metadata_keys = metadata.keys()
-    for tag in search_tags:
-        if tag in metadata.keys():
-            return datetime.datetime.strptime(metadata[tag], "%Y:%m:%d %H:%M:%S")
-    return False
-
-
-def get_hash(file):
-    BLOCK_SIZE = 65536  # The size of each read from the file
-
-    file_hash = (
-        hashlib.sha256()
-    )  # Create the hash object, can use something other than `.sha256()` if you wish
-    with open(file, "rb") as f:  # Open the file to read it's bytes
-        fb = f.read(BLOCK_SIZE)  # Read from the file. Take in the amount declared above
-        while len(fb) > 0:  # While there is still data being read from the file
-            file_hash.update(fb)  # Update the hash
-            fb = f.read(BLOCK_SIZE)  # Read the next block from the file
-
-    return file_hash.hexdigest()  # Get the hexadecimal digest of the hash
-
-
-def run_fast_scandir(dir, ext, output_queue, status_consumer):  # dir: str, ext: list
+def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
     subfolders, files, ignored = [], [], []
 
     for f in os.scandir(dir):
@@ -94,13 +80,12 @@ def run_fast_scandir(dir, ext, output_queue, status_consumer):  # dir: str, ext:
                 logger.debug(f"{f} ignored due to filetype")
                 ignored.append(f.path)
 
-    status = {}
     batch = []
     counter = 0
     for f in files:
         batch.append(f)
         counter += 1
-        if counter == 100:
+        if counter == 400:
             output_queue.put(batch)
             batch = []
             counter = 0
@@ -114,10 +99,6 @@ def run_fast_scandir(dir, ext, output_queue, status_consumer):  # dir: str, ext:
         subfolders.extend(sf)
         files.extend(f)
         ignored.extend(ign)
-        status["proc_name"] = "search guy"
-        status["queue_size"] = len(file)
-        status["processed"] = 0
-        status_consumer.put(status)
 
     return subfolders, files, ignored
 
@@ -127,184 +108,6 @@ def run_fast_scandir(dir, ext, output_queue, status_consumer):  # dir: str, ext:
 #        "*.[jJmMpPhH][pPoOnNeE][gGvV4iI][cC]?"
 #    )
 #
-
-
-class ProcessorConsumer(multiprocessing.Process):
-    def __init__(self, input_queue, output_queue):
-        multiprocessing.Process.__init__(self)
-        self.input_queue = input_queue
-        self.output_queue = output_queue
-
-    def run(self):
-        proc_name = self.name
-        processed = 0
-        while True:
-            action = None
-            message = None
-            input_comparison = None
-            destination_comparison = None
-
-            next_task = self.input_queue.get()
-
-            if next_task is None:
-                # Poison pill means shutdown
-                logger.info(
-                    f"{proc_name}: Finished processing execution instructions.  Process exiting successfully."
-                )
-                self.output_queue.put(None)
-                self.input_queue.task_done()
-                break
-            processed += 1
-
-            # do the thing
-            # first check if the destination folder exists
-            # start with year
-            yearFolder = next_task.destination_root + "\\" + next_task.destination_year
-            if not os.path.isdir(yearFolder):
-                try:
-                    os.mkdir(yearFolder)
-                except Exception as e:
-                    logger.error(
-                        f"{proc_name}: Unable to create directory {yearFolder}.  Error: {str(e)}"
-                    )
-                    continue
-
-            # then month
-            if not os.path.isdir(next_task.destination_folder):
-                try:
-                    os.mkdir(next_task.destination_folder)
-                except Exception as e:
-                    logger.error(
-                        f"{proc_name}: Unable to create directory {next_task.destination_folder}.  Error: {str(e)}"
-                    )
-                    continue
-
-            if os.path.isfile(next_task.destination_fullpath):
-                # file exists
-                # (size, modify date, and hash if need be)
-                fname = pathlib.Path(next_task.destination_fullpath)
-                fstat = fname.stat()
-                dest_file_size = fstat.st_size
-                dest_file_modify_date = datetime.datetime.fromtimestamp(fstat.st_mtime)
-
-                replace_dest = False
-                replace_reason = None
-
-                # if new file is bigger than existing, then assume new is good
-                if dest_file_size < next_task.file_size:
-                    replace_dest = True
-                    replace_reason = f"file size (input={next_task.file_size} existing={dest_file_size})"
-                    message = "file size"
-                    input_comparison = next_task.file_size
-                    destination_comparison = dest_file_size
-                # if content is the same
-                elif next_task.get_hash() == get_hash(next_task.destination_fullpath):
-                    replace_dest = False
-                    replace_reason = "hashes match"
-                    message = "hashes match"
-                    input_comparison = next_task.get_hash()
-                    destination_comparison = next_task.get_hash()
-                else:
-                    with exiftool.ExifTool() as et:
-                        d = et.get_metadata(next_task.destination_fullpath)
-                        # metadata = et.get_metadata_batch(next_task.destination_fullpath)
-                        # for d in metadata:
-                        # get tags
-                        destination_metadata_date = select_date_metadata(d)
-
-                        # couldn't find any metadata, so fall back on file stat
-                        if destination_metadata_date == False:
-                            # if the new file has tags, use them
-                            if next_task.tag_date != None:
-                                replace_reason = f'file modify date (input={next_task.tag_date.strftime("%Y-%m-%d")}(exif) existing={dest_file_modify_date.strftime("%Y-%m-%d")}(file))'
-                                message = "file modify date (exif vs file)"
-                                input_comparison = next_task.tag_date.strftime(
-                                    "%Y-%m-%d"
-                                )
-                                destination_comparison = dest_file_modify_date.strftime(
-                                    "%Y-%m-%d"
-                                )
-                                if dest_file_modify_date < next_task.tag_date:
-                                    # if the existing file was modified more recently than the new file
-                                    # keep the existing file, since its older
-                                    replace_dest = False
-
-                                else:
-                                    # if the existing file was modified less recently than the new file
-                                    # replace the existing with the new file
-                                    replace_dest = True
-
-                            # new file does not have tags either
-                            else:
-                                replace_reason = f'file modify date (input={next_task.file_modify.strftime("%Y-%m-%d")} existing={dest_file_modify_date.strftime("%Y-%m-%d")})'
-                                message = "file modify date (file vs file)"
-                                input_comparison = next_task.file_modify.strftime(
-                                    "%Y-%m-%d"
-                                )
-                                destination_comparison = dest_file_modify_date.strftime(
-                                    "%Y-%m-%d"
-                                )
-                                if dest_file_modify_date < next_task.file_modify:
-                                    # if the existing file was modified more recently than the new file
-                                    # keep the existing file, since its older
-                                    replace_dest = False
-                                else:
-                                    # if the existing file was modified less recently than the new file
-                                    # replace the existing with the new file
-                                    replace_dest = True
-
-                        # found metadata, so use that
-                        else:
-                            replace_reason = f"tag modify date (input={next_task.destination_date} existing={destination_metadata_date})"
-                            message = "file modify date (exif vs exif)"
-                            input_comparison = next_task.destination_date.strftime(
-                                "%Y-%m-%d"
-                            )
-                            destination_comparison = destination_metadata_date.strftime(
-                                "%Y-%m-%d"
-                            )
-                            if destination_metadata_date > next_task.destination_date:
-                                # if the existing file was modified more recently than the new file
-                                # replace the existing with the new file
-                                replace_dest = True
-                            else:
-                                replace_dest = False
-
-                if replace_dest:
-                    logger.debug(
-                        f"{proc_name}: REPLACE (input={next_task.source_fullpath} existing={next_task.destination_fullpath}) - {replace_reason}"
-                    )
-                    action = "REPLACE"
-
-                    # os.replace(
-                    #    next_task.source_fullpath, next_task.destination_fullpath
-                    # )
-                else:
-                    logger.debug(
-                        f"{proc_name}: RETAIN (input={next_task.source_fullpath} existing={next_task.destination_fullpath}) - {replace_reason}"
-                    )
-                    action = "RETAIN"
-                    # os.remove(next_task.source_fullpath)
-
-            else:
-                # file does not exist, so just go ahead and copy it now
-                logger.debug(
-                    f"{proc_name}: NEW (input={next_task.source_fullpath} existing={next_task.destination_fullpath})"
-                )
-                action = "NEW"
-                # os.rename(next_task.source_fullpath, next_task.destination_fullpath)
-            write_log(
-                process=proc_name,
-                action=action,
-                input_file=next_task.source_fullpath,
-                destination_file=next_task.destination_fullpath,
-                message=message,
-                input_comparison=input_comparison,
-                destination_comparison=destination_comparison,
-            )
-
-            if processed % 1000 == 0:
-                logger.info(f"{proc_name}: Processed {processed} files")
 
 
 class ExifConsumer(multiprocessing.Process):
@@ -319,23 +122,35 @@ class ExifConsumer(multiprocessing.Process):
         files_media = 0
         files_skipped = 0
         files_total = 0
-        while True:
 
-            # print(f"Exif queue size: {str(self.input_queue.qsize())}")
+        while True:
             next_task = self.input_queue.get()
 
             if next_task is None:
                 # Poison pill means shutdown
-                logger.info(
+                logger.debug(
                     f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
                 )
                 self.output_queue.put(None)
                 self.input_queue.put(None)
-                # self.input_queue.task_done()
                 break
-
+            error_encountered = False
             with exiftool.ExifTool() as et:
-                metadata = et.get_metadata_batch(next_task)
+                try:
+                    metadata = et.get_metadata_batch(next_task)
+                except Exception as e:
+                    error_encountered = True
+
+            if error_encountered:
+                for task in next_task:
+                    try:
+                        metadata = et.get_metadata_batch(task)
+                    except Exception as e:
+                        print(f"Error on {task}")
+                        exit()
+                print(f"Shouldn't have gotten here?!")
+                exit()
+
             for d in metadata:
                 # now fan out - create images out of each directory search batch
                 files_total += 1
@@ -364,33 +179,31 @@ class ExifConsumer(multiprocessing.Process):
 
 
 class SearchConsumer(multiprocessing.Process):
-    def __init__(self, input_queue, output_queue, manager_dict, status_consumer):
+    def __init__(self, input_queue, output_queue):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
-        self.manager_dict = manager_dict
-        self.status_consumer = status_consumer
 
     def run(self):
-        ext = [".mov", ".jpg", ".heic", ".mp4", ".png", ".jpeg", ".3gp", ".avi"]
+        ext = [".mov", ".jpg", ".heic", ".mp4", ".png", ".jpeg", ".3gp", ".avi", ".jpe"]
         proc_name = self.name
-        self.manager_dict["Search"] = "Searching..."
         while True:
             next_task = self.input_queue.get()
             if next_task is None:
                 # Poison pill means shutdown
-                self.manager_dict[
-                    "Search"
-                ] = f"{proc_name}: Search process finished. Ignored a total of {len(ignored)} files"
                 self.output_queue.put(None)
                 # pass on the poison pill
                 self.input_queue.put(None)
                 # self.input_queue.task_done()
                 break
 
-            sf, f, ignored = run_fast_scandir(
-                next_task, ext, self.output_queue, self.status_consumer
-            )
+            sf, f, ignored = run_fast_scandir(next_task, ext, self.output_queue)
+
+        ignored_file = open("ignored.log", "w", newline="", encoding="utf-8")
+        ignored_writer = csv.writer(ignored_file, delimiter=",", quotechar='"')
+        for igfile in ignored:
+            ignored_writer.writerow([igfile])
+        ignored_file.close()
 
         return
 
@@ -431,25 +244,15 @@ class StatusConsumer(multiprocessing.Process):
 # Flow:
 # 1. SearchConsumer (1 process) starts searching for files, makes batch of 100 at a time and pushes them to exifqueue
 # 2. ExifConsumer (4 processes) picks them up and instantiates ImageFile and pushes them to execution queue
-# 3. ProcessorConsumer queue (1 process) then compares with any existing file (size, modify date, and hash if need be)
-#    and makes the change
 def main():
     paths = argument_functions.validate_arguments(sys.argv)
 
     if paths == False:
         logger.error("Invalid parameters.  Exiting")
-        # sys.exit(-1)
     else:
         logger.debug("Paths is good")
 
     state_machine = imagefile.PhotoMachine(paths["output_path"])
-
-    status_tasks = multiprocessing.JoinableQueue()
-    status_consumer = StatusConsumer(status_tasks)
-    status_consumer.start()
-
-    manager = Manager()
-    managerDict = manager.dict()
 
     ### SEARCHER PROCESS ###
     # establish communication queues
@@ -459,9 +262,7 @@ def main():
     search_results = multiprocessing.JoinableQueue()
 
     # start searchers
-    search_consumer = SearchConsumer(
-        search_tasks, search_results, managerDict, status_consumer
-    )
+    search_consumer = SearchConsumer(search_tasks, search_results)
     search_consumer.start()
 
     # push the incoming search path into the search process
@@ -470,15 +271,15 @@ def main():
     # poison pill to close search process
     search_tasks.put(None)
 
-    # search_tasks.join()
-
     ### EXIF PROCESS ###
     exif_results = multiprocessing.JoinableQueue()
 
     # Start exif consumers
-    # num_consumers = multiprocessing.cpu_count() * 2
-    # for debugging
-    num_consumers = 1
+    if paths["debug"]:
+        num_consumers = 1
+    else:
+        num_consumers = multiprocessing.cpu_count() * 2
+
     logging.debug(f"exif_results: Creating {num_consumers} consumers")
     exif_consumers = [
         ExifConsumer(search_results, exif_results, paths["output_path"])
@@ -488,32 +289,170 @@ def main():
     for w in exif_consumers:
         w.start()
 
-    ### PROCESSOR er.. PROCESS ###
-    processor_results = multiprocessing.Queue()
-
-    # start processor processes
-    processor_consumer = ProcessorConsumer(exif_results, processor_results)
-    processor_consumer.start()
-
     # Start outputting results
     while True:
-        #        if "Search" in managerDict.keys():
-        #            print(f"BLABLAH: {managerDict['Search']}")
-        thisProcessorResult = processor_results.get()
+        thisExifResult = exif_results.get()
 
         # poison pill, we're done here
-        if thisProcessorResult == None:
-            print(f"Exhausted output queue")
-            # poison pill to kill exif consumers
-            # is this even needed?
-            # search_results.put(None)
-            # exif_results.put(None)
+        if thisExifResult == None:
+            logger.debug(f"All queues exhausted - finished multiprocessing")
+            print(f"Processing exif for existing files", end="\r")
+            state_machine.process_exif()
+
+            print(f"\nProcessing decisions", end="\r")
+            state_machine.decide()
+
+            print(f"Writing decision log", end="\r")
+            # first pass for logging
+            counter_written = 0
+            for destination_image in state_machine.ImageObjects_by_destination:
+                for source_image in state_machine.ImageObjects_by_destination[
+                    destination_image
+                ]:
+                    # for source in destination_image:
+                    write_log(
+                        destination_image=destination_image,
+                        source_image=source_image,
+                        winner=str(
+                            state_machine.ImageObjects_by_source[source_image].winner
+                        ),
+                        reason=state_machine.ImageObjects_by_source[
+                            source_image
+                        ].reason,
+                        source_size=state_machine.ImageObjects_by_source[
+                            source_image
+                        ].file_size,
+                        source_hash=state_machine.ImageObjects_by_source[
+                            source_image
+                        ].file_hash,
+                        source_date=state_machine.ImageObjects_by_source[
+                            source_image
+                        ].destination_year
+                        + "-"
+                        + state_machine.ImageObjects_by_source[
+                            source_image
+                        ].destination_month,
+                    )
+                    counter_written += 1
+                    print(
+                        f"\rWriting decisions for {len(state_machine.ImageObjects_by_source)} input files ({round(counter_written/len(state_machine.ImageObjects_by_source)*100,1)}% decisions out of {len(state_machine.ImageObjects_by_source)} input files)        ",
+                        end="\r",
+                    )
+
+            print(f"\nExecuting decisions", end="\r")
+            # second pass for losers (deletes)
+            counter_deleted = 0
+            for source_image in state_machine.ImageObjects_by_source:
+                if state_machine.ImageObjects_by_source[source_image].winner == False:
+                    logger.debug(f"{source_image}: Deleting loser")
+
+                    if paths["dryrun"] == False:
+                        try:
+                            os.remove(
+                                state_machine.ImageObjects_by_source[
+                                    source_image
+                                ].source_fullpath
+                            )
+                        except Exception as e:
+                            print(
+                                f"Failed to delete {state_machine.ImageObjects_by_source[source_image].source_fullpath} due to {str(e)}"
+                            )
+
+                    counter_deleted += 1
+                    print(
+                        f"\rExecuting actions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: 0, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted} ({round(counter_deleted / len(state_machine.ImageObjects_by_source)*100,1)}%)        ",
+                        end="\r",
+                    )
+
+            # get a list of the destination folders and make sure they all exist
+            # todo: rework the ImageObjects_by_destination structure so that it has a pointer to the winner
+            years = {}
+
+            for source_image in state_machine.ImageObjects_by_source:
+                if state_machine.ImageObjects_by_source[source_image].winner == True:
+                    this_winner = state_machine.ImageObjects_by_source[source_image]
+                    if this_winner.destination_year not in years.keys():
+                        years[this_winner.destination_year] = set()
+
+                    years[this_winner.destination_year].add(
+                        this_winner.destination_month
+                    )
+
+            for year in years.keys():
+                this_year_folder = (
+                    state_machine.ImageObjects_by_source[source_image].destination_root
+                    + "/"
+                    + year
+                )
+
+                if not os.path.isdir(this_year_folder):
+                    # it doesn't exist so make it
+                    os.mkdir(this_year_folder)
+
+                for month in years[year]:
+                    this_month_folder = this_year_folder + "/" + month
+                    if not os.path.isdir(this_month_folder):
+                        # it doesn't exist so make it
+                        os.mkdir(this_month_folder)
+
+            counter_moved = 0
+            # third pass for winners.  Do pass two and three separately so that we don't move something and then delete it later - ordering is important
+            for source_image in state_machine.ImageObjects_by_source:
+                if state_machine.ImageObjects_by_source[source_image].winner == True:
+                    if (
+                        state_machine.ImageObjects_by_source[
+                            source_image
+                        ].source_fullpath
+                        == state_machine.ImageObjects_by_source[
+                            source_image
+                        ].destination_fullpath
+                    ):
+                        # don't need to do anything - the file in situ is the right one
+                        logger.debug(
+                            f"{source_image}: Winner already in place, skipping"
+                        )
+                    else:
+                        logger.debug(
+                            f"{source_image}: Moving winner to {state_machine.ImageObjects_by_source[source_image].destination_fullpath}"
+                        )
+                        if paths["dryrun"] == False:
+                            try:
+                                shutil.move(
+                                    state_machine.ImageObjects_by_source[
+                                        source_image
+                                    ].source_fullpath,
+                                    state_machine.ImageObjects_by_source[
+                                        source_image
+                                    ].destination_fullpath,
+                                )
+                            except Exception as e:
+                                print(
+                                    f"Failed to move {state_machine.ImageObjects_by_source[source_image].source_fullpath} to {state_machine.ImageObjects_by_source[source_image].destination_fullpath} due to {str(e)}"
+                                )
+
+                    counter_moved += 1
+
+                print(
+                    f"\rExecuting decisions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: {counter_moved}, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted-counter_moved} ({round((counter_deleted+counter_moved) / len(state_machine.ImageObjects_by_source)*100,1)}% complete)             ",
+                    end="\r",
+                )
+
+            logger.debug("\nFinished executing state machine actions, cleaning up")
+
+            for w in exif_consumers:
+                w.terminate()
+
+            search_consumer.terminate()
+
+            # close the queues so that we can exit cleanly
             log_file.close()
             search_tasks.close()
             search_results.close()
             exif_results.close()
-            processor_results.close()
+
+            logger.debug("\nSuccessfully exiting!")
 
             exit()
         else:
-            print(f"Result: {thisProcessorResult }")
+            # processed a new image, add it to the state machine
+            state_machine.add_image(thisExifResult)
