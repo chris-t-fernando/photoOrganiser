@@ -345,9 +345,9 @@ class PhotoMachine:
                         )
             if files_complete % 200 == 0:
                 print(
-                    f"\rProcessing {len(self.ImageObjects_by_destination)} decisions ({round(files_complete / len(self.ImageObjects_by_destination) *100,1)}% complete)",
+                    f"\rProcessing {len(self.ImageObjects_by_source)} decisions ({round(files_complete / len(self.ImageObjects_by_source) *100,1)}% complete)",
                     end="\r",
                 )
         print(
-            f"\rProcessed {len(self.ImageObjects_by_destination)} decisions (100% complete)         ",
+            f"\rProcessed {len(self.ImageObjects_by_source)} decisions (100% complete)         ",
         )
