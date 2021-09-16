@@ -26,4 +26,4 @@ This one was less about learning (except the multithreading bit) and much more a
 1. Add in ETC for long-running jobs
 1. Set up a folder watcher so that this script will be triggered whenever I copy files into it (this would be pretty cool actually)
 1. Facial recognition - OpenCV looks super well suited to this, though I've only had a 5 minute look at this (this also would be super cool)
-1. find_duplicates.py doesn't actually need or do anything with the --output flag.  I'd need to make the argument parser object more intelligent in order to deal with that, but for now it's more expedient to just enter dummy stuff 
+1. find_duplicates.py doesn't actually need or do anything with the --output flag.  I'd need to make the argument parser object more intelligent in order to deal with that, but for now it's more expedient to just enter a dummy argument to satisfy the validation
