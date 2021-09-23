@@ -1,0 +1,92 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"launch": {
+		"version": "0.2.0",
+		"configurations": [
+			{
+				"name": "Python: Current File",
+				"type": "python",
+				"request": "launch",
+				"program": "${file}",
+				"console": "integratedTerminal",
+				"env": {
+					"DISPLAY": ":1",
+					"PYDEVD_WARN_EVALUATION_TIMEOUT": "500"
+				},
+				"args": [
+					"--input",
+					"Y:/photoOrganiser/sample_data/input",
+					"--output",
+					"Y:/photoOrganiser/sample_data/output",
+					"--debug",
+					"true"
+				]
+			},
+			{
+				"name": "Python: import",
+				"type": "python",
+				"request": "launch",
+				"program": "import.py",
+				"console": "integratedTerminal",
+				"args": [
+					"--input",
+					"Y:/photoOrganiser/sample_data/input",
+					"--output",
+					"Y:/photoOrganiser/sample_data/output",
+					"--debug",
+					"true"
+				]
+			},
+			{
+				"name": "Python: find_dupes",
+				"type": "python",
+				"request": "launch",
+				"program": "find_duplicates.py",
+				"console": "integratedTerminal",
+				"args": [
+					"--input",
+					"Y:/photoOrganiser/sample_data/input",
+					"--output",
+					"Y:/photoOrganiser/sample_data/output",
+					"--debug",
+					"true"
+				]
+			}
+		]
+	},
+	"settings": {
+		"yaml.customTags": [
+			"!And",
+			"!And sequence",
+			"!If",
+			"!If sequence",
+			"!Not",
+			"!Not sequence",
+			"!Equals",
+			"!Equals sequence",
+			"!Or",
+			"!Or sequence",
+			"!FindInMap",
+			"!FindInMap sequence",
+			"!Base64",
+			"!Join",
+			"!Join sequence",
+			"!Cidr",
+			"!Ref",
+			"!Sub",
+			"!Sub sequence",
+			"!GetAtt",
+			"!GetAZs",
+			"!ImportValue",
+			"!ImportValue sequence",
+			"!Select",
+			"!Select sequence",
+			"!Split",
+			"!Split sequence"
+		]
+	}
+}

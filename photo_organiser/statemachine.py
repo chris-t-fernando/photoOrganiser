@@ -6,6 +6,7 @@ from photo_organiser import imagefile
 logger = logging.getLogger("statemachine")
 logger.setLevel(logging.WARN)
 
+
 class PhotoMachine:
     # this holds a dict of the ImageObjects
     ImageObjects_by_source = {}
@@ -22,7 +23,7 @@ class PhotoMachine:
     def __init__(self, destination_root):
         self.destination_root = destination_root
 
-    def add_image(self, the_image):
+    def add_image(self, the_image: imagefile.ImageFile) -> None:
         # store the image
         self.ImageObjects_by_source[the_image.source_fullpath] = the_image
 
@@ -45,7 +46,7 @@ class PhotoMachine:
             the_image.source_fullpath
         )
 
-    def process_exif(self):
+    def process_exif(self) -> None:
         this_batch = []
         batches = 0
 
@@ -76,7 +77,7 @@ class PhotoMachine:
                 end="\r",
             )
 
-    def process_exif_batch(self, this_batch):
+    def process_exif_batch(self, this_batch: list) -> None:
         with exiftool.ExifTool() as et:
             metadata = et.get_metadata_batch(this_batch)
 
@@ -91,7 +92,9 @@ class PhotoMachine:
 
     # return True if new is better than existing
     # or False if they're the same or existing is better
-    def is_better(self, new, existing):
+    def is_better(
+        self, new: imagefile.ImageFile, existing: imagefile.ImageFile
+    ) -> bool:
         # check size
         if new.file_size > existing.file_size:
             return True, "file size is larger"
@@ -114,7 +117,7 @@ class PhotoMachine:
         else:
             return False, "default"
 
-    def decide(self):
+    def decide(self) -> None:
         files_complete = 0
         # loop through the competitors for best destination_image
         for destination_image in self.ImageObjects_by_destination:
@@ -176,6 +179,7 @@ class PhotoMachine:
                     f"\rProcessing {len(self.ImageObjects_by_source)} decisions ({round(files_complete / len(self.ImageObjects_by_source) *100,1)}% complete)",
                     end="\r",
                 )
+
         print(
             f"\rProcessed {len(self.ImageObjects_by_source)} decisions (100% complete)         ",
         )

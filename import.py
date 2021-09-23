@@ -4,7 +4,6 @@ import os
 import shutil
 import datetime
 from photo_organiser import argumentparser
-from photo_organiser import imagefile
 from photo_organiser import statemachine
 from photo_organiser import photoprocesses
 import csv
@@ -36,17 +35,17 @@ log_writer.writerow(
 
 
 def write_log(
-    destination_image,
-    source_image,
-    winner,
-    reason,
-    source_size,
-    source_hash,
-    source_date,
+    destination_image: str,
+    source_image: str,
+    winner: str,
+    reason: str,
+    source_size: int,
+    source_hash: str,
+    source_date: str,
     #    destination_size,
     #    destination_hash,
     #    destination_date,
-):
+) -> None:
     log_writer.writerow(
         [
             datetime.datetime.now().strftime("%H:%M:%S"),
@@ -220,6 +219,7 @@ def main():
                         os.mkdir(this_month_folder)
 
             counter_moved = 0
+
             # third pass for winners.  Do pass two and three separately so that we don't move something and then delete it later - ordering is important
             for source_image in state_machine.ImageObjects_by_source:
                 if state_machine.ImageObjects_by_source[source_image].winner == True:

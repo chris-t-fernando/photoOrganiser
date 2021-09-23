@@ -7,18 +7,20 @@ class ArgumentParserInputPathNotValid(Exception):
     def __init__(self, input_path):
         super().__init__(self, f"{input_path}: Input path does not exist")
 
+
 class ArgumentParserOutputPathNotValid(Exception):
     # exception thrown when the output path does not exist
     def __init__(self, output_path):
         super().__init__(self, f"{output_path}: Output path does not exist")
 
+
 class ArgumentParser:
-    arguments = None
-    incoming_path = None
-    output_path = None
-    debug = False
-    dryrun = False
-    valid_arguments = True
+    arguments: list = None
+    incoming_path: str = None
+    output_path: str = None
+    debug: bool = False
+    dryrun: bool = False
+    valid_arguments: bool = True
 
     def __init__(self, arguments):
         self.arguments = arguments
@@ -87,7 +89,7 @@ class ArgumentParser:
 
         self.valid_arguments = True
 
-    def get_argument(self, arguments, search_argument):
+    def get_argument(self, arguments: list, search_argument: list) -> bool:
         found = False
         for s in search_argument:
             if s in arguments:

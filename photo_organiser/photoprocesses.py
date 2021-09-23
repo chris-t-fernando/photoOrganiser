@@ -1,16 +1,20 @@
 import multiprocessing
+from multiprocessing import JoinableQueue
 import logging
 import os
 import datetime
 from photo_organiser import imagefile
 import exiftool
 import csv
+from typing import Tuple
 
 logger = logging.getLogger("photo_organiser")
 logger.setLevel(logging.INFO)
 
 
-def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
+def run_fast_scandir(
+    dir, ext: list, output_queue: JoinableQueue
+) -> Tuple[list, list, list]:  # dir: str, ext: list
     subfolders, files, ignored = [], [], []
 
     for f in os.scandir(dir):
@@ -54,13 +58,17 @@ def run_fast_scandir(dir, ext, output_queue):  # dir: str, ext: list
 
 
 class ExifConsumer(multiprocessing.Process):
+    input_queue:JoinableQueue
+    output_queue:JoinableQueue
+    destination_root:str
+
     def __init__(self, input_queue, output_queue, destination_root):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.destination_root = destination_root
 
-    def run(self):
+    def run(self) -> None:
         proc_name = self.name
         files_media = 0
         files_skipped = 0
@@ -90,9 +98,13 @@ class ExifConsumer(multiprocessing.Process):
                     try:
                         metadata = et.get_metadata_batch(task)
                     except Exception as e:
-                        print(f"Error on {task} - usually this is caused by bad characters in the filesystem path")
+                        print(
+                            f"Error on {task} - usually this is caused by bad characters in the filesystem path"
+                        )
                         exit()
-                print(f"Shouldn't have gotten here - only ran this block of code to find the failure in the batch, but wasn't able to re-create it when running file by file")
+                print(
+                    f"Shouldn't have gotten here - only ran this block of code to find the failure in the batch, but wasn't able to re-create it when running file by file"
+                )
                 exit()
 
             for d in metadata:
@@ -123,12 +135,15 @@ class ExifConsumer(multiprocessing.Process):
 
 
 class SearchConsumer(multiprocessing.Process):
+    input_queue:JoinableQueue
+    output_queue:JoinableQueue
+
     def __init__(self, input_queue, output_queue):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
 
-    def run(self):
+    def run(self) -> None:
         ext = [".mov", ".jpg", ".heic", ".mp4", ".png", ".jpeg", ".3gp", ".avi", ".jpe"]
         proc_name = self.name
         while True:
@@ -153,11 +168,13 @@ class SearchConsumer(multiprocessing.Process):
 
 
 class StatusConsumer(multiprocessing.Process):
+    input_queue:JoinableQueue
+
     def __init__(self, input_queue):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
 
-    def run(self):
+    def run(self) -> None:
         proc_name = self.name
         last_state = {}
         while True:

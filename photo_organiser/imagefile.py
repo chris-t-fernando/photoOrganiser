@@ -84,11 +84,11 @@ class ImageFile:
                 f"{self.source_fullpath}: Finished analysing file.  Destination {self.destination_fullpath} (exif date)"
             )
 
-    def set_winner(self, bool_winner, reason):
+    def set_winner(self, bool_winner: bool, reason:str) -> None:
         self.winner = bool_winner
         self.reason = reason
 
-    def select_date_metadata(self, metadata):
+    def select_date_metadata(self, metadata:dict) ->bool:
         search_tags = [
             "EXIF:CreateDate",
             "EXIF:DateTimeOriginal",
@@ -114,7 +114,7 @@ class ImageFile:
 
         return False
 
-    def generate_destination(self):
+    def generate_destination(self) -> None:
         # decide on the date to use
         # decide on the target folder location
 
@@ -152,7 +152,7 @@ class ImageFile:
         return
 
     # shamelessly stolen from https://nitratine.net/blog/post/how-to-hash-files-in-python/
-    def get_hash(self):
+    def get_hash(self) -> str:
         # don't do it again if its already done...
         if self.file_hash != None:
             return self.file_hash
