@@ -61,12 +61,14 @@ class ExifConsumer(multiprocessing.Process):
     input_queue: JoinableQueue
     output_queue: JoinableQueue
     destination_root: str
+    et: exiftool.ExifToolHelper
 
     def __init__(self, input_queue, output_queue, destination_root):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.destination_root = destination_root
+        self.et = exiftool.ExifToolHelper()
 
     def run(self) -> None:
         proc_name = self.name
@@ -85,27 +87,23 @@ class ExifConsumer(multiprocessing.Process):
                 self.output_queue.put(None)
                 self.input_queue.put(None)
                 break
+
             error_encountered = False
-            with exiftool.ExifToolHelper() as et:
-                try:
-                    metadata = et.get_metadata(next_task)
-                except Exception as e:
-                    error_encountered = True
+            try:
+                metadata = self.et.get_metadata(next_task)
+            except Exception as e:
+                error_encountered = True
 
             # find out which file in the batch caused the error - need to run get_metadata file by file to do it
             if error_encountered:
+                metadata = []
                 for task in next_task:
                     try:
-                        metadata = et.get_metadata(task)
+                        metadata.append(self.et.get_metadata(task)[0])
                     except Exception as e:
                         print(
                             f"Error on {task} - usually this is caused by bad characters in the filesystem path"
                         )
-                        exit()
-                print(
-                    f"Shouldn't have gotten here - only ran this block of code to find the failure in the batch, but wasn't able to re-create it when running file by file"
-                )
-                exit()
 
             for d in metadata:
                 # now fan out - create images out of each directory search batch

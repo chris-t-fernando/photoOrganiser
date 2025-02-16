@@ -61,12 +61,19 @@ class ImageFile:
             raise ImageNotValidError(self.source_fullpath)
 
         # hold on to stat info from exiftool
-        self.file_create = datetime.datetime.strptime(
-            metadata["File:FileCreateDate"], "%Y:%m:%d %H:%M:%S%z"
-        ).replace(tzinfo=None)
+        if "File:FileCreateDate" in metadata.keys():
+            self.file_create = datetime.datetime.strptime(
+                metadata["File:FileCreateDate"], "%Y:%m:%d %H:%M:%S%z"
+            ).replace(tzinfo=None)
+        else:
+            self.file_create = datetime.datetime.strptime(
+                metadata["File:FileModifyDate"], "%Y:%m:%d %H:%M:%S%z"
+            ).replace(tzinfo=None)
+
         self.file_modify = datetime.datetime.strptime(
             metadata["File:FileModifyDate"], "%Y:%m:%d %H:%M:%S%z"
         ).replace(tzinfo=None)
+
         self.file_size = metadata["File:FileSize"]
 
         # grab whichever date field we can find
@@ -84,11 +91,11 @@ class ImageFile:
                 f"{self.source_fullpath}: Finished analysing file.  Destination {self.destination_fullpath} (exif date)"
             )
 
-    def set_winner(self, bool_winner: bool, reason:str) -> None:
+    def set_winner(self, bool_winner: bool, reason: str) -> None:
         self.winner = bool_winner
         self.reason = reason
 
-    def select_date_metadata(self, metadata:dict) ->bool:
+    def select_date_metadata(self, metadata: dict) -> bool:
         search_tags = [
             "EXIF:CreateDate",
             "EXIF:DateTimeOriginal",

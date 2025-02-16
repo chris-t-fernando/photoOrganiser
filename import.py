@@ -112,12 +112,20 @@ def main():
     for w in exif_consumers:
         w.start()
 
+    exhausted_consumers = 0
     # Start outputting results
     while True:
         thisExifResult = exif_results.get()
 
-        # poison pill, we're done here
-        if thisExifResult == None:
+        if thisExifResult != None:
+            # processed a new image, add it to the state machine
+            state_machine.add_image(thisExifResult)
+        else:
+            # poison pill, we're done here
+            exhausted_consumers += 1
+            print(f"Finished {exhausted_consumers} consumers")
+
+        if exhausted_consumers == num_consumers:
             logger.debug(f"All queues exhausted - finished multiprocessing")
             print(f"Processing exif for existing files", end="\r")
             state_machine.process_exif()
@@ -277,9 +285,6 @@ def main():
             logger.debug("\nSuccessfully exiting!")
 
             exit()
-        else:
-            # processed a new image, add it to the state machine
-            state_machine.add_image(thisExifResult)
 
 
 if __name__ == "__main__":

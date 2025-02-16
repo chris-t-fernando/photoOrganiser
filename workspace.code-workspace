@@ -60,15 +60,14 @@
 				"name": "Python: mac",
 				"type": "python",
 				"request": "launch",
-				"program": "find_duplicates.py",
+				"program": "import.py",
 				"console": "integratedTerminal",
 				"args": [
 					"--input",
-					"/Users/chrisfernando/projects/photo-scratch",
+					"/Users/chrisfernando/projects/scratch-bdfr",
 					"--output",
 					"/Users/chrisfernando/projects/photo-scratch-out",
-					"--debug",
-					"true"
+					"--dryrun",
 				]
 			},
 			{
