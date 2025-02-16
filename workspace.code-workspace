@@ -55,6 +55,43 @@
 					"--debug",
 					"true"
 				]
+			},
+			{
+				"name": "Python: mac",
+				"type": "python",
+				"request": "launch",
+				"program": "find_duplicates.py",
+				"console": "integratedTerminal",
+				"args": [
+					"--input",
+					"/Users/chrisfernando/projects/photo-scratch",
+					"--output",
+					"/Users/chrisfernando/projects/photo-scratch-out",
+					"--debug",
+					"true"
+				]
+			},
+			{
+				"name": "Python Debugger: Attach",
+				"type": "debugpy",
+				"request": "attach",
+				"port": 1235,
+				"host": "192.168.1.114",
+				"pathMappings": [
+					{
+						"localRoot": "${workspaceFolder}", // Maps C:\Users\user1\project1
+						"remoteRoot": "." // To current working directory ~/project1
+					}
+				],
+				"args": [
+					"--input",
+					"Y:/photoOrganiser/sample_data/input",
+					"--output",
+					"Y:/photoOrganiser/sample_data/output",
+					"--debug",
+					"true",
+					"--dryrun"
+				]
 			}
 		]
 	},

@@ -78,8 +78,8 @@ class PhotoMachine:
             )
 
     def process_exif_batch(self, this_batch: list) -> None:
-        with exiftool.ExifTool() as et:
-            metadata = et.get_metadata_batch(this_batch)
+        with exiftool.ExifToolHelper() as et:
+            metadata = et.get_metadata(this_batch)
 
         for d in metadata:
             self.add_image(

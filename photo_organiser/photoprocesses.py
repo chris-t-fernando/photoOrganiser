@@ -58,9 +58,9 @@ def run_fast_scandir(
 
 
 class ExifConsumer(multiprocessing.Process):
-    input_queue:JoinableQueue
-    output_queue:JoinableQueue
-    destination_root:str
+    input_queue: JoinableQueue
+    output_queue: JoinableQueue
+    destination_root: str
 
     def __init__(self, input_queue, output_queue, destination_root):
         multiprocessing.Process.__init__(self)
@@ -86,17 +86,17 @@ class ExifConsumer(multiprocessing.Process):
                 self.input_queue.put(None)
                 break
             error_encountered = False
-            with exiftool.ExifTool() as et:
+            with exiftool.ExifToolHelper() as et:
                 try:
-                    metadata = et.get_metadata_batch(next_task)
+                    metadata = et.get_metadata(next_task)
                 except Exception as e:
                     error_encountered = True
 
-            # find out which file in the batch caused the error - need to run get_metadata_batch file by file to do it
+            # find out which file in the batch caused the error - need to run get_metadata file by file to do it
             if error_encountered:
                 for task in next_task:
                     try:
-                        metadata = et.get_metadata_batch(task)
+                        metadata = et.get_metadata(task)
                     except Exception as e:
                         print(
                             f"Error on {task} - usually this is caused by bad characters in the filesystem path"
@@ -135,8 +135,8 @@ class ExifConsumer(multiprocessing.Process):
 
 
 class SearchConsumer(multiprocessing.Process):
-    input_queue:JoinableQueue
-    output_queue:JoinableQueue
+    input_queue: JoinableQueue
+    output_queue: JoinableQueue
 
     def __init__(self, input_queue, output_queue):
         multiprocessing.Process.__init__(self)
@@ -168,7 +168,7 @@ class SearchConsumer(multiprocessing.Process):
 
 
 class StatusConsumer(multiprocessing.Process):
-    input_queue:JoinableQueue
+    input_queue: JoinableQueue
 
     def __init__(self, input_queue):
         multiprocessing.Process.__init__(self)
