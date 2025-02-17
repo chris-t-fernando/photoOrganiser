@@ -78,6 +78,7 @@ class ExifConsumer(multiprocessing.Process):
 
         while True:
             next_task = self.input_queue.get()
+            self.input_queue.task_done()
 
             if next_task is None:
                 # Poison pill means shutdown
@@ -146,6 +147,7 @@ class SearchConsumer(multiprocessing.Process):
         proc_name = self.name
         while True:
             next_task = self.input_queue.get()
+            self.input_queue.task_done()
             if next_task is None:
                 # Poison pill means shutdown
                 self.output_queue.put(None)
@@ -177,6 +179,7 @@ class StatusConsumer(multiprocessing.Process):
         last_state = {}
         while True:
             next_task = self.input_queue.get()
+            self.input_queue.task_done()
             if next_task is None:
                 # Poison pill means shutdown
                 self.input_queue.put(None)

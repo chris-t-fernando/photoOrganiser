@@ -20,8 +20,11 @@ class PhotoMachine:
     # holds a list of destination paths that already exist and therefore need to be exif'd
     existing_images = []
 
+    et: exiftool.ExifToolHelper
+
     def __init__(self, destination_root):
         self.destination_root = destination_root
+        self.et = exiftool.ExifToolHelper()
 
     def add_image(self, the_image: imagefile.ImageFile) -> None:
         # store the image
@@ -78,8 +81,7 @@ class PhotoMachine:
             )
 
     def process_exif_batch(self, this_batch: list) -> None:
-        with exiftool.ExifToolHelper() as et:
-            metadata = et.get_metadata(this_batch)
+        metadata = self.et.get_metadata(this_batch)
 
         for d in metadata:
             self.add_image(

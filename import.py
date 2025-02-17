@@ -116,7 +116,7 @@ def main():
     # Start outputting results
     while True:
         thisExifResult = exif_results.get()
-
+        exif_results.task_done()
         if thisExifResult != None:
             # processed a new image, add it to the state machine
             state_machine.add_image(thisExifResult)
@@ -127,164 +127,178 @@ def main():
 
         if exhausted_consumers == num_consumers:
             logger.debug(f"All queues exhausted - finished multiprocessing")
-            print(f"Processing exif for existing files", end="\r")
-            state_machine.process_exif()
+            break
 
-            print(f"\nProcessing decisions", end="\r")
-            state_machine.decide()
+    print(f"Processing exif for existing files", end="\r")
+    state_machine.process_exif()
 
-            print(f"Writing decision log", end="\r")
-            # first pass for logging
-            counter_written = 0
-            for destination_image in state_machine.ImageObjects_by_destination:
-                for source_image in state_machine.ImageObjects_by_destination[
-                    destination_image
-                ]:
-                    # for source in destination_image:
-                    write_log(
-                        destination_image=destination_image,
-                        source_image=source_image,
-                        winner=str(
-                            state_machine.ImageObjects_by_source[source_image].winner
-                        ),
-                        reason=state_machine.ImageObjects_by_source[
-                            source_image
-                        ].reason,
-                        source_size=state_machine.ImageObjects_by_source[
-                            source_image
-                        ].file_size,
-                        source_hash=state_machine.ImageObjects_by_source[
-                            source_image
-                        ].file_hash,
-                        source_date=state_machine.ImageObjects_by_source[
-                            source_image
-                        ].destination_year
-                        + "-"
-                        + state_machine.ImageObjects_by_source[
-                            source_image
-                        ].destination_month,
-                    )
-                    counter_written += 1
-                    print(
-                        f"\rWriting decisions for {len(state_machine.ImageObjects_by_source)} input files ({round(counter_written/len(state_machine.ImageObjects_by_source)*100,1)}% decisions out of {len(state_machine.ImageObjects_by_source)} input files)        ",
-                        end="\r",
-                    )
+    print(f"\nProcessing decisions", end="\r")
+    state_machine.decide()
 
-            print(f"\nExecuting decisions", end="\r")
-            # second pass for losers (deletes)
-            counter_deleted = 0
-            for source_image in state_machine.ImageObjects_by_source:
-                if state_machine.ImageObjects_by_source[source_image].winner == False:
-                    logger.debug(f"{source_image}: Deleting loser")
+    print(f"Writing decision log", end="\r")
+    # first pass for logging
+    counter_written = 0
+    for destination_image in state_machine.ImageObjects_by_destination:
+        for source_image in state_machine.ImageObjects_by_destination[
+            destination_image
+        ]:
+            # for source in destination_image:
+            write_log(
+                destination_image=destination_image,
+                source_image=source_image,
+                winner=str(state_machine.ImageObjects_by_source[source_image].winner),
+                reason=state_machine.ImageObjects_by_source[source_image].reason,
+                source_size=state_machine.ImageObjects_by_source[
+                    source_image
+                ].file_size,
+                source_hash=state_machine.ImageObjects_by_source[
+                    source_image
+                ].file_hash,
+                source_date=state_machine.ImageObjects_by_source[
+                    source_image
+                ].destination_year
+                + "-"
+                + state_machine.ImageObjects_by_source[source_image].destination_month,
+            )
+            counter_written += 1
+            print(
+                f"\rWriting decisions for {len(state_machine.ImageObjects_by_source)} input files ({round(counter_written/len(state_machine.ImageObjects_by_source)*100,1)}% decisions out of {len(state_machine.ImageObjects_by_source)} input files)        ",
+                end="\r",
+            )
 
-                    if paths.dryrun == False:
-                        try:
-                            os.remove(
-                                state_machine.ImageObjects_by_source[
-                                    source_image
-                                ].source_fullpath
-                            )
-                        except Exception as e:
-                            print(
-                                f"Failed to delete {state_machine.ImageObjects_by_source[source_image].source_fullpath} due to {str(e)}"
-                            )
+    print(f"\nExecuting decisions", end="\r")
+    # second pass for losers (deletes)
+    counter_deleted = 0
+    for source_image in state_machine.ImageObjects_by_source:
+        if state_machine.ImageObjects_by_source[source_image].winner == False:
+            logger.debug(f"{source_image}: Deleting loser")
 
-                    counter_deleted += 1
-                    print(
-                        f"\rExecuting actions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: 0, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted} ({round(counter_deleted / len(state_machine.ImageObjects_by_source)*100,1)}%)        ",
-                        end="\r",
-                    )
-
-            # get a list of the destination folders and make sure they all exist
-            # todo: rework the ImageObjects_by_destination structure so that it has a pointer to the winner
-            years = {}
-
-            for source_image in state_machine.ImageObjects_by_source:
-                if state_machine.ImageObjects_by_source[source_image].winner == True:
-                    this_winner = state_machine.ImageObjects_by_source[source_image]
-                    if this_winner.destination_year not in years.keys():
-                        years[this_winner.destination_year] = set()
-
-                    years[this_winner.destination_year].add(
-                        this_winner.destination_month
-                    )
-
-            for year in years.keys():
-                this_year_folder = (
-                    state_machine.ImageObjects_by_source[source_image].destination_root
-                    + "/"
-                    + year
-                )
-
-                if not os.path.isdir(this_year_folder):
-                    # it doesn't exist so make it
-                    os.mkdir(this_year_folder)
-
-                for month in years[year]:
-                    this_month_folder = this_year_folder + "/" + month
-                    if not os.path.isdir(this_month_folder):
-                        # it doesn't exist so make it
-                        os.mkdir(this_month_folder)
-
-            counter_moved = 0
-
-            # third pass for winners.  Do pass two and three separately so that we don't move something and then delete it later - ordering is important
-            for source_image in state_machine.ImageObjects_by_source:
-                if state_machine.ImageObjects_by_source[source_image].winner == True:
-                    if (
+            if paths.dryrun == False:
+                try:
+                    os.remove(
                         state_machine.ImageObjects_by_source[
                             source_image
                         ].source_fullpath
-                        == state_machine.ImageObjects_by_source[
-                            source_image
-                        ].destination_fullpath
-                    ):
-                        # don't need to do anything - the file in situ is the right one
-                        logger.debug(
-                            f"{source_image}: Winner already in place, skipping"
-                        )
-                    else:
-                        logger.debug(
-                            f"{source_image}: Moving winner to {state_machine.ImageObjects_by_source[source_image].destination_fullpath}"
-                        )
-                        if paths.dryrun == False:
-                            try:
-                                shutil.move(
-                                    state_machine.ImageObjects_by_source[
-                                        source_image
-                                    ].source_fullpath,
-                                    state_machine.ImageObjects_by_source[
-                                        source_image
-                                    ].destination_fullpath,
-                                )
-                            except Exception as e:
-                                print(
-                                    f"Failed to move {state_machine.ImageObjects_by_source[source_image].source_fullpath} to {state_machine.ImageObjects_by_source[source_image].destination_fullpath} due to {str(e)}"
-                                )
+                    )
+                except Exception as e:
+                    print(
+                        f"Failed to delete {state_machine.ImageObjects_by_source[source_image].source_fullpath} due to {str(e)}"
+                    )
 
-                    counter_moved += 1
+            counter_deleted += 1
+            print(
+                f"\rExecuting actions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: 0, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted} ({round(counter_deleted / len(state_machine.ImageObjects_by_source)*100,1)}%)        ",
+                end="\r",
+            )
 
-                print(
-                    f"\rExecuting decisions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: {counter_moved}, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted-counter_moved} ({round((counter_deleted+counter_moved) / len(state_machine.ImageObjects_by_source)*100,1)}% complete)             ",
-                    end="\r",
+    # get a list of the destination folders and make sure they all exist
+    # todo: rework the ImageObjects_by_destination structure so that it has a pointer to the winner
+    years = {}
+
+    for source_image in state_machine.ImageObjects_by_source:
+        if state_machine.ImageObjects_by_source[source_image].winner == True:
+            this_winner = state_machine.ImageObjects_by_source[source_image]
+            if this_winner.destination_year not in years.keys():
+                years[this_winner.destination_year] = set()
+
+            years[this_winner.destination_year].add(this_winner.destination_month)
+
+    for year in years.keys():
+        this_year_folder = (
+            state_machine.ImageObjects_by_source[source_image].destination_root
+            + "/"
+            + year
+        )
+
+        if not os.path.isdir(this_year_folder):
+            # it doesn't exist so make it
+            os.mkdir(this_year_folder)
+
+        for month in years[year]:
+            this_month_folder = this_year_folder + "/" + month
+            if not os.path.isdir(this_month_folder):
+                # it doesn't exist so make it
+                os.mkdir(this_month_folder)
+
+    counter_moved = 0
+
+    # third pass for winners.  Do pass two and three separately so that we don't move something and then delete it later - ordering is important
+    for source_image in state_machine.ImageObjects_by_source:
+        if state_machine.ImageObjects_by_source[source_image].winner == True:
+            if (
+                state_machine.ImageObjects_by_source[source_image].source_fullpath
+                == state_machine.ImageObjects_by_source[
+                    source_image
+                ].destination_fullpath
+            ):
+                # don't need to do anything - the file in situ is the right one
+                logger.debug(f"{source_image}: Winner already in place, skipping")
+            else:
+                logger.debug(
+                    f"{source_image}: Moving winner to {state_machine.ImageObjects_by_source[source_image].destination_fullpath}"
                 )
+                if paths.dryrun == False:
+                    try:
+                        shutil.move(
+                            state_machine.ImageObjects_by_source[
+                                source_image
+                            ].source_fullpath,
+                            state_machine.ImageObjects_by_source[
+                                source_image
+                            ].destination_fullpath,
+                        )
+                    except Exception as e:
+                        print(
+                            f"Failed to move {state_machine.ImageObjects_by_source[source_image].source_fullpath} to {state_machine.ImageObjects_by_source[source_image].destination_fullpath} due to {str(e)}"
+                        )
 
-            logger.debug("\nFinished executing state machine actions, cleaning up")
+            counter_moved += 1
 
-            for w in exif_consumers:
-                w.terminate()
+        print(
+            f"\rExecuting decisions for {len(state_machine.ImageObjects_by_source)} input files. Deleted: {counter_deleted}, Moved: {counter_moved}, Remaining: {len(state_machine.ImageObjects_by_source)-counter_deleted-counter_moved} ({round((counter_deleted+counter_moved) / len(state_machine.ImageObjects_by_source)*100,1)}% complete)             ",
+            end="\r",
+        )
 
-            search_consumer.terminate()
+    logger.debug("\nFinished executing state machine actions, cleaning up")
 
-            # close the queues so that we can exit cleanly
-            log_file.close()
-            search_tasks.close()
-            search_results.close()
-            exif_results.close()
+    for w in exif_consumers:
+        while not w.input_queue.empty():
+            w.input_queue.get()
+            w.input_queue.task_done()
+        w.input_queue.join()
+        w.input_queue.close()
 
-            logger.debug("\nSuccessfully exiting!")
+        while not w.output_queue.empty():
+            w.output_queue.get()
+            w.output_queue.task_done()
+        w.output_queue.join()
+        w.output_queue.close()
 
-            exit()
+        w.et.terminate()
+
+        w.terminate()
+        w.join()
+        w.close()
+
+    search_consumer.terminate()
+    state_machine.et.terminate()
+
+    # close the queues so that we can exit cleanly
+    log_file.close()
+    search_tasks.close()
+    search_results.close()
+    exif_results.close()
+
+    # for w in exif_consumers:
+    #    print(w.input_queue.empty())
+    #    print(w.output_queue.empty())
+
+    for child in multiprocessing.active_children():
+        print(f"Active child: {child}")
+
+    logger.debug("\nSuccessfully exiting!")
+
+    exit()
 
 
 if __name__ == "__main__":
