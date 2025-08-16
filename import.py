@@ -79,30 +79,22 @@ def main():
 
     ### SEARCHER PROCESS ###
     # establish communication queues
-    search_tasks = (
-        multiprocessing.JoinableQueue()
-    )  # overkill given I'm only allowing one input path - could just pass the string
+    search_tasks = multiprocessing.JoinableQueue()
     search_results = multiprocessing.JoinableQueue()
-
-    # start searchers
-    search_consumer = photoprocesses.SearchConsumer(search_tasks, search_results)
-    search_consumer.start()
-
-    # push the incoming search path into the search process
-    search_tasks.put(paths.incoming_path)
-
-    # poison pill to close search process
-    search_tasks.put(None)
-
-    ### EXIF PROCESS ###
     exif_results = multiprocessing.JoinableQueue()
 
-    # Start exif consumers
+    # determine number of exif consumers and start searcher with fanout
     if paths.debug:
         num_consumers = 1
     else:
         num_consumers = multiprocessing.cpu_count() * 2
 
+    search_consumer = photoprocesses.SearchConsumer(
+        search_tasks, search_results, num_consumers
+    )
+    search_consumer.start()
+
+    # Start exif consumers
     logging.debug(f"exif_results: Creating {num_consumers} consumers")
     exif_consumers = [
         photoprocesses.ExifConsumer(search_results, exif_results, paths.output_path)
@@ -111,6 +103,12 @@ def main():
 
     for w in exif_consumers:
         w.start()
+
+    # push the incoming search path into the search process
+    search_tasks.put(paths.incoming_path)
+
+    # poison pill to close search process
+    search_tasks.put(None)
 
     exhausted_consumers = 0
     # Start outputting results
@@ -266,8 +264,10 @@ def main():
         w.join()
         w.close()
     search_consumer.join()
+    search_consumer.close()
 
     state_machine.et.terminate()
+    state_machine.et = None
 
     # close the queues so that we can exit cleanly
     log_file.close()

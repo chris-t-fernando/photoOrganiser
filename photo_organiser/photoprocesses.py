@@ -76,90 +76,97 @@ class ExifConsumer(multiprocessing.Process):
         files_skipped = 0
         files_total = 0
 
-        while True:
-            next_task = self.input_queue.get()
+        try:
+            while True:
+                next_task = self.input_queue.get()
 
-            if next_task is None:
-                # Poison pill means shutdown
-                logger.debug(
-                    f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
-                )
-                self.input_queue.task_done()
-                self.et.terminate()
-                self.output_queue.put(None)
-                self.input_queue.put(None)
-                break
+                if next_task is None:
+                    # Poison pill means shutdown
+                    logger.debug(
+                        f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
+                    )
+                    self.input_queue.task_done()
+                    self.output_queue.put(None)
+                    break
 
-            error_encountered = False
-            try:
-                metadata = self.et.get_metadata(next_task)
-            except Exception as e:
-                error_encountered = True
-
-            # find out which file in the batch caused the error - need to run get_metadata file by file to do it
-            if error_encountered:
-                metadata = []
-                for task in next_task:
-                    try:
-                        metadata.append(self.et.get_metadata(task)[0])
-                    except Exception as e:
-                        print(
-                            f"Error on {task} - usually this is caused by bad characters in the filesystem path"
-                        )
-
-            for d in metadata:
-                # now fan out - create images out of each directory search batch
-                files_total += 1
+                error_encountered = False
                 try:
-                    self.output_queue.put(
-                        imagefile.ImageFile(
-                            source_fullpath=d["SourceFile"],
-                            destination_root=self.destination_root,
-                            metadata=d,
+                    metadata = self.et.get_metadata(next_task)
+                except Exception as e:
+                    error_encountered = True
+
+                # find out which file in the batch caused the error - need to run get_metadata file by file to do it
+                if error_encountered:
+                    metadata = []
+                    for task in next_task:
+                        try:
+                            metadata.append(self.et.get_metadata(task)[0])
+                        except Exception as e:
+                            print(
+                                f"Error on {task} - usually this is caused by bad characters in the filesystem path"
+                            )
+
+                for d in metadata:
+                    # now fan out - create images out of each directory search batch
+                    files_total += 1
+                    try:
+                        self.output_queue.put(
+                            imagefile.ImageFile(
+                                source_fullpath=d["SourceFile"],
+                                destination_root=self.destination_root,
+                                metadata=d,
+                            )
                         )
-                    )
-                    logging.debug(
-                        f"{d['SourceFile']}: Pushed new media object to queue"
-                    )
-                    files_media += 1
-                    if files_total % 100 == 0:
                         logging.debug(
-                            f"{proc_name}: Found {files_total} so far. {files_media} are valid media, {files_skipped} were ignored."
+                            f"{d['SourceFile']}: Pushed new media object to queue"
                         )
+                        files_media += 1
+                        if files_total % 100 == 0:
+                            logging.debug(
+                                f"{proc_name}: Found {files_total} so far. {files_media} are valid media, {files_skipped} were ignored."
+                            )
 
-                except imagefile.ImageNotValidError as e:
-                    logging.debug(
-                        f"{proc_name}: {d['SourceFile']}: Invalid media object.  Skipped"
-                    )
-                    files_skipped += 1
+                    except imagefile.ImageNotValidError as e:
+                        logging.debug(
+                            f"{proc_name}: {d['SourceFile']}: Invalid media object.  Skipped"
+                        )
+                        files_skipped += 1
 
-            # finished processing this batch
-            self.input_queue.task_done()
+                # finished processing this batch
+                self.input_queue.task_done()
+        finally:
+            try:
+                if self.et:
+                    self.et.terminate()
+            finally:
+                self.et = None
 
 
 class SearchConsumer(multiprocessing.Process):
     input_queue: JoinableQueue
     output_queue: JoinableQueue
+    fanout: int
 
-    def __init__(self, input_queue, output_queue):
+    def __init__(self, input_queue, output_queue, fanout: int):
         multiprocessing.Process.__init__(self)
         self.input_queue = input_queue
         self.output_queue = output_queue
+        self.fanout = fanout
 
     def run(self) -> None:
         ext = [".mov", ".jpg", ".heic", ".mp4", ".png", ".jpeg", ".3gp", ".avi", ".jpe"]
-        proc_name = self.name
+        ignored: list[str] = []
         while True:
             next_task = self.input_queue.get()
             if next_task is None:
                 # Poison pill means shutdown
                 self.input_queue.task_done()
-                self.output_queue.put(None)
-                # pass on the poison pill
-                self.input_queue.put(None)
+                for _ in range(self.fanout):
+                    self.output_queue.put(None)
                 break
 
-            sf, f, ignored = run_fast_scandir(next_task, ext, self.output_queue)
+            sf, f, ign = run_fast_scandir(next_task, ext, self.output_queue)
+            ignored.extend(ign)
             # finished processing this folder
             self.input_queue.task_done()
 
