@@ -79,30 +79,22 @@ def main():
 
     ### SEARCHER PROCESS ###
     # establish communication queues
-    search_tasks = (
-        multiprocessing.JoinableQueue()
-    )  # overkill given I'm only allowing one input path - could just pass the string
+    search_tasks = multiprocessing.JoinableQueue()
     search_results = multiprocessing.JoinableQueue()
-
-    # start searchers
-    search_consumer = photoprocesses.SearchConsumer(search_tasks, search_results)
-    search_consumer.start()
-
-    # push the incoming search path into the search process
-    search_tasks.put(paths.incoming_path)
-
-    # poison pill to close search process
-    search_tasks.put(None)
-
-    ### EXIF PROCESS ###
     exif_results = multiprocessing.JoinableQueue()
 
-    # Start exif consumers
+    # determine number of exif consumers and start searcher with fanout
     if paths.debug:
         num_consumers = 1
     else:
         num_consumers = multiprocessing.cpu_count() * 2
 
+    search_consumer = photoprocesses.SearchConsumer(
+        search_tasks, search_results, num_consumers
+    )
+    search_consumer.start()
+
+    # Start exif consumers
     logging.debug(f"exif_results: Creating {num_consumers} consumers")
     exif_consumers = [
         photoprocesses.ExifConsumer(search_results, exif_results, paths.output_path)
@@ -111,6 +103,12 @@ def main():
 
     for w in exif_consumers:
         w.start()
+
+    # push the incoming search path into the search process
+    search_tasks.put(paths.incoming_path)
+
+    # poison pill to close search process
+    search_tasks.put(None)
 
     exhausted_consumers = 0
     # Start outputting results
@@ -261,40 +259,27 @@ def main():
 
     logger.debug("\nFinished executing state machine actions, cleaning up")
 
+    # ensure worker processes have finished
     for w in exif_consumers:
-        while not w.input_queue.empty():
-            w.input_queue.get()
-            w.input_queue.task_done()
-        w.input_queue.join()
-        w.input_queue.close()
-
-        while not w.output_queue.empty():
-            w.output_queue.get()
-            w.output_queue.task_done()
-        w.output_queue.join()
-        w.output_queue.close()
-
-        w.et.terminate()
-
-        w.terminate()
         w.join()
         w.close()
+    search_consumer.join()
+    search_consumer.close()
 
-    search_consumer.terminate()
-    state_machine.et.terminate()
+    # Ensure the ExifTool process used by the state machine is cleaned
+    # up before the interpreter shuts down. It may already have been
+    # cleared if an earlier error occurred, so guard against None.
+    if state_machine.et:
+        state_machine.et.terminate()
+        state_machine.et = None
 
     # close the queues so that we can exit cleanly
     log_file.close()
-    search_tasks.close()
-    search_results.close()
-    exif_results.close()
 
-    # for w in exif_consumers:
-    #    print(w.input_queue.empty())
-    #    print(w.output_queue.empty())
-
-    for child in multiprocessing.active_children():
-        print(f"Active child: {child}")
+    for q in (search_tasks, search_results, exif_results):
+        q.join()
+        q.close()
+        q.join_thread()
 
     logger.debug("\nSuccessfully exiting!")
 
