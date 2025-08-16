@@ -78,13 +78,14 @@ class ExifConsumer(multiprocessing.Process):
 
         while True:
             next_task = self.input_queue.get()
-            self.input_queue.task_done()
 
             if next_task is None:
                 # Poison pill means shutdown
                 logger.debug(
                     f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
                 )
+                self.input_queue.task_done()
+                self.et.terminate()
                 self.output_queue.put(None)
                 self.input_queue.put(None)
                 break
@@ -132,6 +133,9 @@ class ExifConsumer(multiprocessing.Process):
                     )
                     files_skipped += 1
 
+            # finished processing this batch
+            self.input_queue.task_done()
+
 
 class SearchConsumer(multiprocessing.Process):
     input_queue: JoinableQueue
@@ -147,16 +151,17 @@ class SearchConsumer(multiprocessing.Process):
         proc_name = self.name
         while True:
             next_task = self.input_queue.get()
-            self.input_queue.task_done()
             if next_task is None:
                 # Poison pill means shutdown
+                self.input_queue.task_done()
                 self.output_queue.put(None)
                 # pass on the poison pill
                 self.input_queue.put(None)
-                # self.input_queue.task_done()
                 break
 
             sf, f, ignored = run_fast_scandir(next_task, ext, self.output_queue)
+            # finished processing this folder
+            self.input_queue.task_done()
 
         ignored_file = open("ignored.log", "w", newline="", encoding="utf-8")
         ignored_writer = csv.writer(ignored_file, delimiter=",", quotechar='"')
@@ -179,11 +184,10 @@ class StatusConsumer(multiprocessing.Process):
         last_state = {}
         while True:
             next_task = self.input_queue.get()
-            self.input_queue.task_done()
             if next_task is None:
                 # Poison pill means shutdown
-                self.input_queue.put(None)
                 self.input_queue.task_done()
+                self.input_queue.put(None)
                 break
 
             # assume next_task is a dict
@@ -198,6 +202,6 @@ class StatusConsumer(multiprocessing.Process):
             if a.second % 5 == 0:
                 for t in last_state:
                     print(f'{t["proc_name"]}')
-                pass
+            self.input_queue.task_done()
 
         return

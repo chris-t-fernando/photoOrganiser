@@ -261,40 +261,21 @@ def main():
 
     logger.debug("\nFinished executing state machine actions, cleaning up")
 
+    # ensure worker processes have finished
     for w in exif_consumers:
-        while not w.input_queue.empty():
-            w.input_queue.get()
-            w.input_queue.task_done()
-        w.input_queue.join()
-        w.input_queue.close()
-
-        while not w.output_queue.empty():
-            w.output_queue.get()
-            w.output_queue.task_done()
-        w.output_queue.join()
-        w.output_queue.close()
-
-        w.et.terminate()
-
-        w.terminate()
         w.join()
         w.close()
+    search_consumer.join()
 
-    search_consumer.terminate()
     state_machine.et.terminate()
 
     # close the queues so that we can exit cleanly
     log_file.close()
-    search_tasks.close()
-    search_results.close()
-    exif_results.close()
 
-    # for w in exif_consumers:
-    #    print(w.input_queue.empty())
-    #    print(w.output_queue.empty())
-
-    for child in multiprocessing.active_children():
-        print(f"Active child: {child}")
+    for q in (search_tasks, search_results, exif_results):
+        q.join()
+        q.close()
+        q.join_thread()
 
     logger.debug("\nSuccessfully exiting!")
 
