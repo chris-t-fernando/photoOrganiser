@@ -68,13 +68,22 @@ class ExifConsumer(multiprocessing.Process):
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.destination_root = destination_root
-        self.et = exiftool.ExifToolHelper()
+        # ExifToolHelper will be created in run() to avoid spawning
+        # helper instances in the parent process on platforms such as
+        # Windows where multiprocessing uses the "spawn" start method.
+        # Initialising the helper here would create an ExifTool process
+        # in the parent which then attempts to clean up at interpreter
+        # shutdown, resulting in noisy "can't create new thread" errors.
+        self.et = None
 
     def run(self) -> None:
         proc_name = self.name
         files_media = 0
         files_skipped = 0
         files_total = 0
+
+        # Create the helper inside the child process
+        self.et = exiftool.ExifToolHelper()
 
         try:
             while True:

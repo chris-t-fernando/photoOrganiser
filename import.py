@@ -266,8 +266,12 @@ def main():
     search_consumer.join()
     search_consumer.close()
 
-    state_machine.et.terminate()
-    state_machine.et = None
+    # Ensure the ExifTool process used by the state machine is cleaned
+    # up before the interpreter shuts down. It may already have been
+    # cleared if an earlier error occurred, so guard against None.
+    if state_machine.et:
+        state_machine.et.terminate()
+        state_machine.et = None
 
     # close the queues so that we can exit cleanly
     log_file.close()
