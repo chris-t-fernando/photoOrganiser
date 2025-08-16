@@ -68,69 +68,84 @@ class ExifConsumer(multiprocessing.Process):
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.destination_root = destination_root
-        self.et = exiftool.ExifToolHelper()
+        # ExifToolHelper is now created in ``run`` to avoid spawning an
+        # instance in the parent process during ``fork``.  Initialising it
+        # here would result in the ExifTool process being copied to the child
+        # and remaining in the parent, so defer creation until ``run``.
+        self.et = None
 
     def run(self) -> None:
-        proc_name = self.name
-        files_media = 0
-        files_skipped = 0
-        files_total = 0
+        # Start the ExifToolHelper within the spawned process to ensure the
+        # ExifTool process only lives in the child.  ``finally`` guarantees it
+        # is terminated even if an exception occurs.
+        self.et = exiftool.ExifToolHelper()
+        try:
+            proc_name = self.name
+            files_media = 0
+            files_skipped = 0
+            files_total = 0
 
-        while True:
-            next_task = self.input_queue.get()
-            self.input_queue.task_done()
+            while True:
+                next_task = self.input_queue.get()
+                self.input_queue.task_done()
 
-            if next_task is None:
-                # Poison pill means shutdown
-                logger.debug(
-                    f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
-                )
-                self.output_queue.put(None)
-                self.input_queue.put(None)
-                break
+                if next_task is None:
+                    # Poison pill means shutdown
+                    logger.debug(
+                        f"{proc_name}: Finished exif analysis. Found {files_total} in total ({files_media} valid, {files_skipped} ignored). Process exiting successfully."
+                    )
+                    self.output_queue.put(None)
+                    self.input_queue.put(None)
+                    break
 
-            error_encountered = False
-            try:
-                metadata = self.et.get_metadata(next_task)
-            except Exception as e:
-                error_encountered = True
-
-            # find out which file in the batch caused the error - need to run get_metadata file by file to do it
-            if error_encountered:
-                metadata = []
-                for task in next_task:
-                    try:
-                        metadata.append(self.et.get_metadata(task)[0])
-                    except Exception as e:
-                        print(
-                            f"Error on {task} - usually this is caused by bad characters in the filesystem path"
-                        )
-
-            for d in metadata:
-                # now fan out - create images out of each directory search batch
-                files_total += 1
+                error_encountered = False
                 try:
-                    self.output_queue.put(
-                        imagefile.ImageFile(
-                            source_fullpath=d["SourceFile"],
-                            destination_root=self.destination_root,
-                            metadata=d,
-                        )
-                    )
-                    logging.debug(
-                        f"{d['SourceFile']}: Pushed new media object to queue"
-                    )
-                    files_media += 1
-                    if files_total % 100 == 0:
-                        logging.debug(
-                            f"{proc_name}: Found {files_total} so far. {files_media} are valid media, {files_skipped} were ignored."
-                        )
+                    metadata = self.et.get_metadata(next_task)
+                except Exception as e:
+                    error_encountered = True
 
-                except imagefile.ImageNotValidError as e:
-                    logging.debug(
-                        f"{proc_name}: {d['SourceFile']}: Invalid media object.  Skipped"
-                    )
-                    files_skipped += 1
+                # find out which file in the batch caused the error - need to run get_metadata file by file to do it
+                if error_encountered:
+                    metadata = []
+                    for task in next_task:
+                        try:
+                            metadata.append(self.et.get_metadata(task)[0])
+                        except Exception as e:
+                            print(
+                                f"Error on {task} - usually this is caused by bad characters in the filesystem path"
+                            )
+
+                for d in metadata:
+                    # now fan out - create images out of each directory search batch
+                    files_total += 1
+                    try:
+                        self.output_queue.put(
+                            imagefile.ImageFile(
+                                source_fullpath=d["SourceFile"],
+                                destination_root=self.destination_root,
+                                metadata=d,
+                            )
+                        )
+                        logging.debug(
+                            f"{d['SourceFile']}: Pushed new media object to queue"
+                        )
+                        files_media += 1
+                        if files_total % 100 == 0:
+                            logging.debug(
+                                f"{proc_name}: Found {files_total} so far. {files_media} are valid media, {files_skipped} were ignored."
+                            )
+
+                    except imagefile.ImageNotValidError as e:
+                        logging.debug(
+                            f"{proc_name}: {d['SourceFile']}: Invalid media object.  Skipped"
+                        )
+                        files_skipped += 1
+        finally:
+            # Terminate the ExifTool process and clean up the reference so that
+            # no lingering instances remain.
+            if self.et is not None:
+                self.et.terminate()
+                self.et = None
 
 
 class SearchConsumer(multiprocessing.Process):
